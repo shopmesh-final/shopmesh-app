@@ -1,0 +1,44 @@
+name: Notify Failure
+
+on:
+  workflow_call:
+    inputs:
+      workflow_name:
+        required: true
+        type: string
+      run_url:
+        required: true
+        type: string
+    secrets:
+      SENDGRID_API_KEY:
+        required: true
+      NOTIFY_FROM_EMAIL:
+        required: true
+      NOTIFY_TO_EMAIL:
+        required: true
+
+jobs:
+  notify:
+    name: Send Failure Email
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure email via SendGrid
+        uses: licenseware/send-email-notification@v1
+        with:
+          api-key:       ${{ secrets.SENDGRID_API_KEY }}
+          from-email:    ${{ secrets.NOTIFY_FROM_EMAIL }}
+          to-email:      ${{ secrets.NOTIFY_TO_EMAIL }}
+          subject:       "[FAILED] ShopMesh CI — ${{ github.ref_name }}"
+          markdown-body: |
+            ## CI Pipeline Failed
+
+            | Field | Value |
+            |---|---|
+            | **Repository** | `${{ github.repository }}` |
+            | **Branch** | `${{ github.ref_name }}` |
+            | **Commit SHA** | `${{ github.sha }}` |
+            | **Workflow** | `${{ inputs.workflow_name }}` |
+            | **Triggered by** | `${{ github.actor }}` |
+            | **Commit Message** | ${{ github.event.head_commit.message }} |
+
+            **[View Failed Run](${{ inputs.run_url }})**

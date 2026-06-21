@@ -1,0 +1,100 @@
+name: Image Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        required: true
+        type: string
+      service_path:
+        required: true
+        type: string
+      image_tag:
+        required: true
+        type: string
+      push_to_ecr:
+        type: boolean
+        default: false
+    outputs:
+      image_uri:
+        description: "Full ECR image URI including tag"
+        value: ${{ jobs.image.outputs.image_uri }}
+
+jobs:
+  image:
+    name: Image Pipeline — ${{ inputs.service_name }}
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.meta.outputs.image_uri }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image metadata
+        id: meta
+        run: |
+          TAG=$(echo "${{ inputs.image_tag }}" | cut -c1-7)
+          URI="242969680553.dkr.ecr.us-east-1.amazonaws.com/shopmesh/${{ inputs.service_name }}:${TAG}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "image_uri=${URI}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.service_path }}
+          load: true
+          tags: ${{ steps.meta.outputs.image_uri }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Trivy: vuln + secret + misconfig, fail on HIGH or CRITICAL ────────────
+      - name: Trivy scan (table output)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref:      ${{ steps.meta.outputs.image_uri }}
+          format:         table
+          exit-code:      "1"
+          severity:       HIGH,CRITICAL
+          scanners:       vuln,secret,misconfig
+          ignore-unfixed: false
+
+      - name: Trivy scan (SARIF artifact)
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.image_uri }}
+          format:    sarif
+          output:    trivy-${{ inputs.service_name }}.sarif
+          severity:  HIGH,CRITICAL
+          scanners:  vuln,secret,misconfig
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name:           trivy-${{ inputs.service_name }}
+          path:           trivy-${{ inputs.service_name }}.sarif
+          retention-days: 7
+
+      # ── ECR push via GitHub OIDC (main branch only) ───────────────────────────
+      - name: Configure AWS credentials (OIDC)
+        if: inputs.push_to_ecr
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region:     us-east-1
+
+      - name: Login to Amazon ECR
+        if: inputs.push_to_ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push to ECR
+        if: inputs.push_to_ecr
+        run: docker push ${{ steps.meta.outputs.image_uri }}

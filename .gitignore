@@ -1,0 +1,31 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+terraform.tfvars
+
+# Node
+**/node_modules/
+**/dist/
+**/.next/
+**/build/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.venv/
+**/venv/
+**/.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.DS_Store
+
+# Secrets
+**/.env
+**/.env.*
+!**/.env.example

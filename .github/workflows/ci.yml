@@ -1,0 +1,150 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # ── 1. Detect which services changed ─────────────────────────────────────────
+  #
+  # Uses dorny/paths-filter to produce per-service booleans, then builds a
+  # dynamic JSON matrix containing ONLY the changed services with their
+  # path + runtime metadata. Downstream jobs consume the matrix via fromJson().
+  #
+  # If nothing changed (e.g. a README-only commit) every downstream job is
+  # skipped cleanly — no empty-matrix error, no spurious notifications.
+  # ─────────────────────────────────────────────────────────────────────────────
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      matrix:      ${{ steps.build-matrix.outputs.matrix }}
+      any_changed: ${{ steps.build-matrix.outputs.any_changed }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Filter changed paths per service
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            auth-service:
+              - 'aws-terraform/auth-service/**'
+            product-service:
+              - 'aws-terraform/product-service/**'
+            order-service:
+              - 'aws-terraform/order-service/**'
+            analytics-service:
+              - 'aws-terraform/analytics-service/**'
+            ai-assistant-service:
+              - 'aws-terraform/ai-assistant-service/**'
+            frontend:
+              - 'aws-terraform/frontend/**'
+
+      - name: Build dynamic matrix from changed services
+        id: build-matrix
+        env:
+          AUTH_CHANGED:      ${{ steps.filter.outputs.auth-service }}
+          PRODUCT_CHANGED:   ${{ steps.filter.outputs.product-service }}
+          ORDER_CHANGED:     ${{ steps.filter.outputs.order-service }}
+          ANALYTICS_CHANGED: ${{ steps.filter.outputs.analytics-service }}
+          AI_CHANGED:        ${{ steps.filter.outputs.ai-assistant-service }}
+          FRONTEND_CHANGED:  ${{ steps.filter.outputs.frontend }}
+        run: |
+          INCLUDE='[]'
+
+          [ "$AUTH_CHANGED"      = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"auth-service","path":"aws-terraform/auth-service","runtime":"node"}]')
+          [ "$PRODUCT_CHANGED"   = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"product-service","path":"aws-terraform/product-service","runtime":"node"}]')
+          [ "$ORDER_CHANGED"     = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"order-service","path":"aws-terraform/order-service","runtime":"python"}]')
+          [ "$ANALYTICS_CHANGED" = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"analytics-service","path":"aws-terraform/analytics-service","runtime":"python"}]')
+          [ "$AI_CHANGED"        = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"ai-assistant-service","path":"aws-terraform/ai-assistant-service","runtime":"python"}]')
+          [ "$FRONTEND_CHANGED"  = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"frontend","path":"aws-terraform/frontend","runtime":"node"}]')
+
+          COUNT=$(echo "$INCLUDE" | jq 'length')
+          echo "Changed service count: ${COUNT}"
+
+          if [ "$COUNT" -gt 0 ]; then
+            MATRIX=$(echo "$INCLUDE" | jq -c '{include: .}')
+            echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+            echo "any_changed=true"  >> $GITHUB_OUTPUT
+            echo "Matrix: ${MATRIX}"
+          else
+            echo "any_changed=false" >> $GITHUB_OUTPUT
+            echo "No service paths changed — all pipeline stages will be skipped"
+          fi
+
+  # ── 2. Build & Test (changed services only) ──────────────────────────────────
+  build-test:
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    needs: detect-changes
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: ./.github/workflows/build-test.yml
+    with:
+      service_name: ${{ matrix.service }}
+      service_path: ${{ matrix.path }}
+      runtime:      ${{ matrix.runtime }}
+    secrets: inherit
+
+  # ── 3. Code Quality (changed services only) ───────────────────────────────────
+  code-quality:
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    needs: [detect-changes, build-test]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: ./.github/workflows/code-quality.yml
+    with:
+      service_name: ${{ matrix.service }}
+      service_path: ${{ matrix.path }}
+      runtime:      ${{ matrix.runtime }}
+    secrets: inherit
+
+  # ── 4. Image Pipeline (build+scan; +ECR push on main only) ───────────────────
+  image-pipeline:
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    needs: [detect-changes, code-quality]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: ./.github/workflows/image-pipeline.yml
+    with:
+      service_name: ${{ matrix.service }}
+      service_path: ${{ matrix.path }}
+      image_tag:    ${{ github.sha }}
+      push_to_ecr:  ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    secrets: inherit
+
+  # ── 5. Update Helm (main push + changed services only) ───────────────────────
+  update-helm:
+    if: needs.detect-changes.outputs.any_changed == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [detect-changes, image-pipeline]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: ./.github/workflows/update-helm.yml
+    with:
+      service_name: ${{ matrix.service }}
+      image_tag:    ${{ github.sha }}
+    secrets: inherit
+
+  # ── 6. Notify on any failure ──────────────────────────────────────────────────
+  #
+  # Skipped jobs (those whose 'if' evaluated to false) are not failures —
+  # failure() returns true only when a job that actually ran exits non-zero.
+  # This means notify-failure behaves correctly regardless of how many services
+  # ran or were skipped in a given commit.
+  # ─────────────────────────────────────────────────────────────────────────────
+  notify-failure:
+    if: failure()
+    needs: [detect-changes, build-test, code-quality, image-pipeline, update-helm]
+    uses: ./.github/workflows/notify-failure.yml
+    with:
+      workflow_name: ${{ github.workflow }}
+      run_url:       "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+    secrets: inherit
