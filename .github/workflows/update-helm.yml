@@ -52,4 +52,15 @@ jobs:
             exit 0
           fi
           git commit -m "ci: update ${{ inputs.service_name }} image to ${{ steps.tag.outputs.short }}"
-          git push
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push succeeded on attempt ${i}"
+              break
+            fi
+            if [ "${i}" -eq 5 ]; then
+              echo "Push failed after 5 attempts"
+              exit 1
+            fi
+            echo "Push rejected (attempt ${i}/5), rebasing onto origin/main..."
+            git pull --rebase origin main
+          done
