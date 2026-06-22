@@ -5,7 +5,7 @@
 *.tfplan
 .terraform.lock.hcl
 terraform.tfvars
-
+shopmesh-gitops/
 # Node
 **/node_modules/
 **/dist/
