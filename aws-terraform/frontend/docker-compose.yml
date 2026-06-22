@@ -1,0 +1,29 @@
+services:
+  # ─── Frontend ─────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # In local mode, React talks to services on localhost ports
+        - REACT_APP_AUTH_SERVICE_URL=http://localhost:3001/api/auth
+        - REACT_APP_PRODUCT_SERVICE_URL=http://localhost:3002/api/products
+        - REACT_APP_ORDER_SERVICE_URL=http://localhost:3003/api/orders
+        # Leave REACT_APP_INTERNAL_ALB_URL empty for local dev
+        - REACT_APP_INTERNAL_ALB_URL=
+        - REACT_APP_AI_ASSISTANT_URL=http://localhost:3005/api/assistant
+    container_name: shopmesh-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      # Runtime nginx variable (empty = no proxy, React uses baked-in URLs)
+      - INTERNAL_ALB_URL=http://host.docker.internal:3001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

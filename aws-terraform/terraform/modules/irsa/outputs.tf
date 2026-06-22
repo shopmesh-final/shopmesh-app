@@ -1,0 +1,10 @@
+output "auth_service_role_arn" { value = aws_iam_role.auth_service.arn }
+output "product_service_role_arn" { value = aws_iam_role.product_service.arn }
+output "order_service_role_arn" { value = aws_iam_role.order_service.arn }
+output "analytics_service_role_arn" { value = aws_iam_role.analytics_service.arn }
+output "ai_assistant_service_role_arn" { value = aws_iam_role.ai_assistant_service.arn }
+output "external_secrets_role_arn" { value = aws_iam_role.external_secrets.arn }
+output "aws_lb_controller_role_arn" { value = aws_iam_role.aws_lb_controller.arn }
+output "cloudwatch_agent_role_arn" { value = aws_iam_role.cloudwatch_agent.arn }
+output "fluent_bit_role_arn" { value = aws_iam_role.fluent_bit.arn }
+output "ebs_csi_role_arn" { value = aws_iam_role.ebs_csi.arn }
