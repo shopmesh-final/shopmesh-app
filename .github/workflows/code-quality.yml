@@ -18,6 +18,8 @@ on:
         required: true
       SONAR_HOST_URL:
         required: true
+      SONAR_ORGANIZATION:
+        required: true
       SNYK_TOKEN:
         required: true
 
@@ -38,6 +40,7 @@ jobs:
           args: >
             -Dsonar.projectKey=${{ inputs.service_name }}
             -Dsonar.projectName=${{ inputs.service_name }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
