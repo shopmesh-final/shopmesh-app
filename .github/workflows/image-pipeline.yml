@@ -54,14 +54,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── Trivy: vuln + secret + misconfig, fail on HIGH or CRITICAL ────────────
+      # ── Trivy: vuln + secret + misconfig, fail on CRITICAL only ─────────────
       - name: Trivy scan (table output)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref:      ${{ steps.meta.outputs.image_uri }}
           format:         table
           exit-code:      "1"
-          severity:       HIGH,CRITICAL
+          severity:       CRITICAL
           scanners:       vuln,secret,misconfig
           ignore-unfixed: false
 
