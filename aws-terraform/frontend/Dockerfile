@@ -23,6 +23,8 @@ RUN npm run build
 # Stage 2: Serve with Nginx + envsubst for runtime config injection
 FROM nginx:1.25-alpine
 
+RUN apk upgrade --no-cache
+
 # Install gettext for envsubst
 RUN apk add --no-cache gettext
 
