@@ -38,8 +38,8 @@ jobs:
         with:
           projectBaseDir: ${{ inputs.service_path }}
           args: >
-            -Dsonar.projectKey=${{ inputs.service_name }}
-            -Dsonar.projectName=${{ inputs.service_name }}
+            -Dsonar.projectKey=shopmesh-app
+            -Dsonar.projectName=shopmesh-app
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
