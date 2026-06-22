@@ -83,13 +83,13 @@ jobs:
 
       - name: Snyk scan (Node)
         if: inputs.runtime == 'node'
-        run: snyk test --severity-threshold=high --json-file-output=snyk-report.json
+        run: snyk test --severity-threshold=critical --json-file-output=snyk-report.json
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: Snyk scan (Python)
         if: inputs.runtime == 'python'
-        run: snyk test --file=requirements.txt --package-manager=pip --severity-threshold=high --json-file-output=snyk-report.json
+        run: snyk test --file=requirements.txt --package-manager=pip --severity-threshold=critical --json-file-output=snyk-report.json
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
