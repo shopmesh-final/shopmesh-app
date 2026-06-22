@@ -165,3 +165,14 @@ output "frontend_target_group_arn" {
   description = "Frontend ALB target group ARN — ip type, used by EKS TargetGroupBinding"
   value       = module.alb.frontend_target_group_arn
 }
+
+# ─── GitHub Actions ───────────────────────────────────────────────────────
+output "github_actions_role_arn" {
+  description = "IAM role ARN — set as AWS_CI_ROLE_ARN repository variable in shopmesh-app"
+  value       = aws_iam_role.github_actions.arn
+}
+
+output "github_oidc_provider_arn" {
+  description = "GitHub Actions OIDC provider ARN"
+  value       = aws_iam_openid_connect_provider.github_actions.arn
+}
