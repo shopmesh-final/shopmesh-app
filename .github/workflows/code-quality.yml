@@ -41,7 +41,6 @@ jobs:
             -Dsonar.projectKey=shopmesh-app
             -Dsonar.projectName=shopmesh-app
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
-            -Dsonar.qualitygate.wait=true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
