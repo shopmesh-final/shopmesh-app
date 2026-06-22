@@ -147,8 +147,8 @@ const AuthPage = () => {
 
         <div className="auth-toggle">
           {mode === 'login'
-            ? <>Don't have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode('register'); }}>Register</a></>
-            : <>Already have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>Sign In</a></>
+            ? <>Don't have an account? <a href="/" onClick={(e) => { e.preventDefault(); switchMode('register'); }}>Register</a></>
+            : <>Already have an account? <a href="/" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>Sign In</a></>
           }
         </div>
       </div>

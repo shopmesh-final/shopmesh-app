@@ -92,7 +92,7 @@ const ForecastTab = ({ data, loading, error, onRefresh }) => {
         </button>
       </div>
 
-      <AIBox text={data.ai_narrative} bedrockEnabled={true} />
+      <AIBox text={data.ai_narrative} bedrockEnabled={bedrockEnabled} />
 
       {data.products.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
