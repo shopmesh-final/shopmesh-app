@@ -109,6 +109,9 @@ jobs:
   image-pipeline:
     if: needs.detect-changes.outputs.any_changed == 'true'
     needs: [detect-changes, code-quality]
+    permissions:
+      id-token: write  # required: OIDC token exchange for ECR push
+      contents: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
