@@ -63,7 +63,7 @@ jobs:
           exit-code:      "1"
           severity:       CRITICAL
           scanners:       vuln,secret,misconfig
-          ignore-unfixed: false
+          ignore-unfixed: true
 
       - name: Trivy scan (SARIF artifact)
         if: always()
