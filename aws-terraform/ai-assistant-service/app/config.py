@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     order_service_url: str = "http://order-service:3003"
 
     bedrock_model_id: str = "amazon.nova-lite-v1:0"
+    bedrock_cross_account_role_arn: str = "arn:aws:iam::686591366739:role/shopmesh-bedrock-cross-account"
+    bedrock_region: str = "us-east-1"
 
     class Config:
         env_file = ".env"
