@@ -1,0 +1,346 @@
+name: Terraform CI/CD
+
+# ─── Triggers ────────────────────────────────────────────────────────────────
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - 'environments/**'
+      - 'modules/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - 'environments/**'
+      - 'modules/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, prod]
+
+# Prevent concurrent Terraform operations on the same ref.
+# cancel-in-progress: false ensures an in-flight apply is never killed.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write        # OIDC → AWS
+  contents: read
+  pull-requests: write   # PR plan comments (future use)
+  security-events: write # SARIF upload
+
+# ─── Global env ──────────────────────────────────────────────────────────────
+env:
+  TF_VERSION: '1.15.6'
+  TF_WORKING_DIR: environments/dev   # override with workflow_dispatch.environment when needed
+  AWS_REGION: us-east-1
+  TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── 1. SECURITY SCAN  (PR + main) ─────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    outputs:
+      tfsec:   ${{ steps.outputs.outputs.tfsec }}
+      checkov: ${{ steps.outputs.outputs.checkov }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      # tfsec — static analysis for Terraform misconfigs
+      - name: Run tfsec
+        id: tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ${{ env.TF_WORKING_DIR }}
+          minimum_severity: HIGH
+          format: lovely
+          soft_fail: true   # We control the exit ourselves below
+        continue-on-error: true
+
+      # Checkov — policy-as-code scanning
+      - name: Run Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ env.TF_WORKING_DIR }}
+          framework: terraform
+          soft_fail: true
+          compact: true
+          output_format: cli,sarif
+          output_file_path: console,checkov-results.sarif
+        continue-on-error: true
+
+      - name: Upload Checkov SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-results.sarif
+        continue-on-error: true  # SARIF upload is best-effort
+
+      # Set outputs BEFORE failing so the summary job always has values
+      - name: Set job outputs
+        id: outputs
+        if: always()
+        run: |
+          [ "${{ steps.tfsec.outcome }}" = "success" ]   && TFSEC="✅ Pass"   || TFSEC="❌ Fail"
+          [ "${{ steps.checkov.outcome }}" = "success" ] && CHECKOV="✅ Pass" || CHECKOV="❌ Fail"
+          echo "tfsec=$TFSEC"     >> "$GITHUB_OUTPUT"
+          echo "checkov=$CHECKOV" >> "$GITHUB_OUTPUT"
+
+      - name: Fail on HIGH severity findings
+        if: steps.tfsec.outcome == 'failure' || steps.checkov.outcome == 'failure'
+        run: |
+          echo "::error::Security scan detected HIGH severity issues — see tfsec/Checkov output above."
+          exit 1
+
+  # ── 2. TERRAFORM VALIDATE + PLAN  (PR + main) ─────────────────────────────
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+
+    outputs:
+      fmt:      ${{ steps.outputs.outputs.fmt }}
+      validate: ${{ steps.outputs.outputs.validate }}
+      plan:     ${{ steps.outputs.outputs.plan }}
+      add:      ${{ steps.outputs.outputs.add }}
+      change:   ${{ steps.outputs.outputs.change }}
+      destroy:  ${{ steps.outputs.outputs.destroy }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Create cache dir first — actions/cache restore requires the path to exist
+      - name: Create plugin cache dir
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      # Cache provider binaries to speed up init across runs
+      - name: Cache Terraform providers
+        uses: actions/cache@v4.2.3
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: ${{ runner.os }}-tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', env.TF_WORKING_DIR)) }}
+          restore-keys: ${{ runner.os }}-tf-
+
+      # fmt — check formatting without modifying files
+      - name: terraform fmt
+        id: fmt
+        run: terraform fmt -check -recursive
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
+      # init — download providers (uses cache if available)
+      - name: terraform init
+        run: terraform init -input=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      # validate — syntax and config validity check
+      - name: terraform validate
+        id: validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
+      # Gate: abort early if fmt/validate failed (no point running plan)
+      - name: Fail on fmt / validate errors
+        if: steps.fmt.outcome == 'failure' || steps.validate.outcome == 'failure'
+        run: |
+          [ "${{ steps.fmt.outcome }}" = "failure" ]      && echo "::error::terraform fmt -check failed — run 'terraform fmt -recursive' locally."
+          [ "${{ steps.validate.outcome }}" = "failure" ] && echo "::error::terraform validate failed — fix configuration errors above."
+          exit 1
+
+      # plan — generate and save the execution plan
+      - name: terraform plan
+        id: plan
+        run: terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan_output.txt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      # Parse add/change/destroy counts from plan output for the summary
+      - name: Extract plan resource counts
+        id: counts
+        if: always()
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          ADD=$(grep -oP '(?<=Plan: )\d+(?= to add)'    plan_output.txt 2>/dev/null || echo "0")
+          CHG=$(grep -oP '\d+(?= to change)'             plan_output.txt 2>/dev/null || echo "0")
+          DEL=$(grep -oP '\d+(?= to destroy)'            plan_output.txt 2>/dev/null || echo "0")
+          echo "add=$ADD"    >> "$GITHUB_OUTPUT"
+          echo "change=$CHG" >> "$GITHUB_OUTPUT"
+          echo "destroy=$DEL" >> "$GITHUB_OUTPUT"
+
+      # Set outputs BEFORE the job ends so the summary job always has values
+      - name: Set job outputs
+        id: outputs
+        if: always()
+        run: |
+          [ "${{ steps.fmt.outcome }}"      = "success" ] && FMT="✅ Pass"      || FMT="❌ Fail"
+          [ "${{ steps.validate.outcome }}" = "success" ] && VALIDATE="✅ Pass" || VALIDATE="❌ Fail"
+          [ "${{ steps.plan.outcome }}"     = "success" ] && PLAN="✅ Pass"     || PLAN="❌ Fail"
+          echo "fmt=$FMT"           >> "$GITHUB_OUTPUT"
+          echo "validate=$VALIDATE" >> "$GITHUB_OUTPUT"
+          echo "plan=$PLAN"         >> "$GITHUB_OUTPUT"
+          echo "add=${{ steps.counts.outputs.add }}"       >> "$GITHUB_OUTPUT"
+          echo "change=${{ steps.counts.outputs.change }}" >> "$GITHUB_OUTPUT"
+          echo "destroy=${{ steps.counts.outputs.destroy }}" >> "$GITHUB_OUTPUT"
+
+      # Upload the binary plan + human-readable output as artifacts
+      - name: Upload plan artifacts
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: tfplan-${{ github.run_id }}
+          path: |
+            ${{ env.TF_WORKING_DIR }}/tfplan
+            ${{ env.TF_WORKING_DIR }}/plan_output.txt
+          retention-days: 5   # Plans older than 5 days are stale
+
+  # ── 3. STEP SUMMARY  (PR + main, always) ─────────────────────────────────
+  workflow-summary:
+    name: Workflow Summary
+    runs-on: ubuntu-latest
+    needs: [security-scan, terraform-plan]
+    if: always()
+
+    steps:
+      - name: Write GitHub Step Summary
+        env:
+          TFSEC:    ${{ needs.security-scan.outputs.tfsec }}
+          CHECKOV:  ${{ needs.security-scan.outputs.checkov }}
+          FMT:      ${{ needs.terraform-plan.outputs.fmt }}
+          VALIDATE: ${{ needs.terraform-plan.outputs.validate }}
+          PLAN:     ${{ needs.terraform-plan.outputs.plan }}
+          ADD:      ${{ needs.terraform-plan.outputs.add }}
+          CHANGE:   ${{ needs.terraform-plan.outputs.change }}
+          DESTROY:  ${{ needs.terraform-plan.outputs.destroy }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          # Terraform CI/CD — Run Summary
+
+          ## Security Checks
+          | Tool    | Status    |
+          |---------|-----------|
+          | tfsec   | $TFSEC   |
+          | Checkov | $CHECKOV |
+
+          ## Terraform Checks
+          | Check    | Status     |
+          |----------|------------|
+          | fmt      | $FMT      |
+          | validate | $VALIDATE |
+          | plan     | $PLAN     |
+
+          ## Plan Summary
+          | Operation   | Count    |
+          |-------------|----------|
+          | ➕ Add      | $ADD     |
+          | 🔄 Change   | $CHANGE  |
+          | 🗑️ Destroy  | $DESTROY |
+
+          > **Artifact**: \`tfplan-${{ github.run_id }}\` (5-day retention)
+          EOF
+
+  # ── 4. MANUAL APPROVAL + APPLY  (main push only) ─────────────────────────
+  #
+  # This job only runs on push to main AND only if both security-scan and
+  # terraform-plan succeeded.  The `environment: production` declaration
+  # pauses execution here until a reviewer approves in GitHub Environments.
+  # Configure required reviewers at:
+  #   Repository → Settings → Environments → production → Required reviewers
+  # ─────────────────────────────────────────────────────────────────────────
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [security-scan, terraform-plan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production   # ← manual approval gate lives here
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Create cache dir first — actions/cache restore requires the path to exist
+      - name: Create plugin cache dir
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      # Restore cached providers so init doesn't re-download
+      - name: Restore Terraform provider cache
+        uses: actions/cache@v4.2.3
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: ${{ runner.os }}-tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', env.TF_WORKING_DIR)) }}
+          restore-keys: ${{ runner.os }}-tf-
+
+      - name: terraform init
+        run: terraform init -input=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      # Download the exact plan produced by the plan job — prevents drift
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: tfplan-${{ github.run_id }}
+          path: ${{ env.TF_WORKING_DIR }}
+
+      # Apply the saved plan — no re-planning, no surprises
+      - name: terraform apply
+        id: apply
+        run: terraform apply -input=false -no-color tfplan 2>&1 | tee apply_output.txt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      # Retain apply logs for 30 days for audit purposes
+      - name: Upload apply logs
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: apply-logs-${{ github.run_id }}
+          path: ${{ env.TF_WORKING_DIR }}/apply_output.txt
+          retention-days: 30
+
+      - name: Write apply summary
+        if: always()
+        env:
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        run: |
+          [ "$APPLY_OUTCOME" = "success" ] && APPLY_STATUS="✅ Success" || APPLY_STATUS="❌ Failed"
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+
+          ## Apply Summary
+          | Check           | Status          |
+          |-----------------|-----------------|
+          | Approval Status | ✅ Approved     |
+          | Apply Status    | $APPLY_STATUS   |
+          EOF

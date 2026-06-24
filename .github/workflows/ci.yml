@@ -33,17 +33,17 @@ jobs:
         with:
           filters: |
             auth-service:
-              - 'aws-terraform/auth-service/**'
+              - 'shopmesh-app/auth-service/**'
             product-service:
-              - 'aws-terraform/product-service/**'
+              - 'shopmesh-app/product-service/**'
             order-service:
-              - 'aws-terraform/order-service/**'
+              - 'shopmesh-app/order-service/**'
             analytics-service:
-              - 'aws-terraform/analytics-service/**'
+              - 'shopmesh-app/analytics-service/**'
             ai-assistant-service:
-              - 'aws-terraform/ai-assistant-service/**'
+              - 'shopmesh-app/ai-assistant-service/**'
             frontend:
-              - 'aws-terraform/frontend/**'
+              - 'shopmesh-app/frontend/**'
 
       - name: Build dynamic matrix from changed services
         id: build-matrix
@@ -57,12 +57,12 @@ jobs:
         run: |
           INCLUDE='[]'
 
-          [ "$AUTH_CHANGED"      = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"auth-service","path":"aws-terraform/auth-service","runtime":"node"}]')
-          [ "$PRODUCT_CHANGED"   = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"product-service","path":"aws-terraform/product-service","runtime":"node"}]')
-          [ "$ORDER_CHANGED"     = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"order-service","path":"aws-terraform/order-service","runtime":"python"}]')
-          [ "$ANALYTICS_CHANGED" = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"analytics-service","path":"aws-terraform/analytics-service","runtime":"python"}]')
-          [ "$AI_CHANGED"        = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"ai-assistant-service","path":"aws-terraform/ai-assistant-service","runtime":"python"}]')
-          [ "$FRONTEND_CHANGED"  = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"frontend","path":"aws-terraform/frontend","runtime":"node"}]')
+          [ "$AUTH_CHANGED"      = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"auth-service","path":"shopmesh-app/auth-service","runtime":"node"}]')
+          [ "$PRODUCT_CHANGED"   = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"product-service","path":"shopmesh-app/product-service","runtime":"node"}]')
+          [ "$ORDER_CHANGED"     = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"order-service","path":"shopmesh-app/order-service","runtime":"python"}]')
+          [ "$ANALYTICS_CHANGED" = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"analytics-service","path":"shopmesh-app/analytics-service","runtime":"python"}]')
+          [ "$AI_CHANGED"        = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"ai-assistant-service","path":"shopmesh-app/ai-assistant-service","runtime":"python"}]')
+          [ "$FRONTEND_CHANGED"  = "true" ] && INCLUDE=$(echo "$INCLUDE" | jq '. += [{"service":"frontend","path":"shopmesh-app/frontend","runtime":"node"}]')
 
           COUNT=$(echo "$INCLUDE" | jq 'length')
           echo "Changed service count: ${COUNT}"
