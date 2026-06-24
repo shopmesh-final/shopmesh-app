@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Attr
 from fastapi import APIRouter, Depends
 
-from app.db.dynamodb import bedrock_client, orders_table, products_table
+from app.db.dynamodb import get_bedrock_client, orders_table, products_table
 from app.dependencies import require_admin
 from app.config import settings
 
@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def _call_bedrock(prompt: str):
-    if not bedrock_client:
+    client = get_bedrock_client()
+    if not client:
         logger.warning("[BEDROCK-FORECAST] bedrock_client is None — skipping (LOCAL_MODE?)")
         return None
     try:
@@ -23,7 +24,7 @@ def _call_bedrock(prompt: str):
             "messages": [{"role": "user", "content": [{"text": prompt}]}],
             "inferenceConfig": {"max_new_tokens": 300, "temperature": 0.3}
         })
-        response = bedrock_client.invoke_model(
+        response = client.invoke_model(
             modelId=settings.bedrock_model_id,
             body=body,
             contentType="application/json"
@@ -153,7 +154,7 @@ async def inventory_forecast(current_user: dict = Depends(require_admin)):
 
     # AI narrative
     ai_narrative = None
-    if bedrock_client and products_analysis:
+    if not settings.local_mode and products_analysis:
         lines = [
             f"- {p['name']}: stock={p['current_stock']}, avg_weekly={p['avg_weekly_sales']}, "
             f"trend={p['trend_pct']:+d}%, days_until_stockout={p['days_until_stockout']}, risk={p['risk_level']}"

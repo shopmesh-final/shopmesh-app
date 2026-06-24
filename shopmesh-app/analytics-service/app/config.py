@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     # Bedrock
     bedrock_model_id: str = "amazon.nova-lite-v1:0"
+    bedrock_cross_account_role_arn: str = "arn:aws:iam::686591366739:role/shopmesh-bedrock-cross-account"
 
     class Config:
         env_file = ".env"

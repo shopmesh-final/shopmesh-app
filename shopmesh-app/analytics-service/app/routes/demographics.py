@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 
-from app.db.dynamodb import bedrock_client, orders_table, users_table
+from app.db.dynamodb import get_bedrock_client, orders_table, users_table
 from app.dependencies import require_admin
 from app.config import settings
 
@@ -29,7 +29,8 @@ def _age_group(age) -> str:
 
 
 def _call_bedrock(prompt: str) -> Optional[str]:
-    if not bedrock_client:
+    client = get_bedrock_client()
+    if not client:
         logger.warning("[BEDROCK-DEMOGRAPHICS] bedrock_client is None — skipping (LOCAL_MODE?)")
         return None
     try:
@@ -38,7 +39,7 @@ def _call_bedrock(prompt: str) -> Optional[str]:
             "messages": [{"role": "user", "content": [{"text": prompt}]}],
             "inferenceConfig": {"max_new_tokens": 300, "temperature": 0.3}
         })
-        response = bedrock_client.invoke_model(
+        response = client.invoke_model(
             modelId=settings.bedrock_model_id,
             body=body,
             contentType="application/json"
@@ -157,7 +158,7 @@ async def demographics(current_user: dict = Depends(require_admin)):
 
     # AI narrative
     ai_narrative = None
-    if bedrock_client and products_list:
+    if not settings.local_mode and products_list:
         top = products_list[:5]
         lines = []
         for p in top:
